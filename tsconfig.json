@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    // File Structure
+    "rootDir": "src",
+    "outDir": "dist",
+    // Language & Module Target
+    "target": "ES6", // Use ES6 features
+    "module": "commonjs", // Standard Node/Express style
+    // Node.js Environment
+    "lib": [
+      "ES6"
+    ],
+    "types": [
+      "node"
+    ], // Add Node types
+    "esModuleInterop": true, // Enables `import express from "express"`
+    "resolveJsonModule": true, // Allows importing .json files
+    // Output & Debug
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    // Type Safety
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    // Optional Enhancements
+    "noImplicitReturns": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

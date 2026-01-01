@@ -1,0 +1,10 @@
+import { Router } from "express";
+import * as subject from '../controllers/subject.controller';
+import chapterRouter from "./chapter.route";
+const subjectRouter = Router();
+subjectRouter.get("/", subject.getSubjects);
+subjectRouter.post("/create", subject.createSubject);
+subjectRouter.put("/:id", subject.updateSubject);
+subjectRouter.delete("/:id", subject.deleteSubject);
+subjectRouter.use("/:subjectId/chapters", chapterRouter);
+export default subjectRouter;
