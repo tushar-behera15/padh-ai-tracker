@@ -47,21 +47,49 @@ export async function updateChapter(req: Request, res: Response) {
         if (!token) {
             return res.status(401).json({ message: "Unauthorized" });
         }
+
         const { name } = req.body;
-        const { id: chapterId } = req.params;
+        const { chapterId } = req.params;
+
         if (!name) {
-            return res.status(400).json({ message: "Field name is required" });
+            return res.status(400).json({ message: "Chapter name is required" });
         }
-        const decoded = verifyToken(token) as { userId: string };
-        const chapters = await db.query<{ id: string; name: string; user_id: string }>("UPDATE chapters c SET name=$1 FROM subject s WHERE c.id = $2 AND c.subject_id=s.id AND s.user_id = $3 RETURNING id,name,user_id", [name, chapterId, decoded.userId]);
-        if (chapters.length == 0) {
+
+        const { userId } = verifyToken(token) as { userId: string };
+
+        const chapters = await db.query<{
+            id: string;
+            name: string;
+            subject_id: string;
+        }>(
+            `
+      UPDATE chapters c
+      SET name = $1
+      FROM subjects s
+      WHERE c.id = $2
+        AND c.subject_id = s.id
+        AND s.user_id = $3
+      RETURNING c.id, c.name, c.subject_id
+      `,
+            [name, chapterId, userId]
+        );
+
+        if (chapters.length === 0) {
             return res.status(404).json({ message: "Chapter not found" });
         }
-        return res.status(200).json({ message: "Chapter Updated successfully", chapter: chapters[0] });
+
+        return res.status(200).json({
+            message: "Chapter updated successfully",
+            chapter: chapters[0]
+        });
+
     } catch (err) {
-        return res.status(401).json({ message: "Invalid or expired token" });
+        console.error("updateChapter error:", err);
+
+        return res.status(500).json({ message: "Internal server error" });
     }
 }
+
 
 
 export async function deleteChapter(req: Request, res: Response) {

@@ -1,10 +1,13 @@
 import { Router } from "express";
+import * as score from '../controllers/score.controller';
 import * as subject from '../controllers/subject.controller';
 import chapterRouter from "./chapter.route";
+import scoreRouter from "./score.route";
 const subjectRouter = Router();
 subjectRouter.get("/", subject.getSubjects);
 subjectRouter.post("/create", subject.createSubject);
 subjectRouter.put("/:id", subject.updateSubject);
 subjectRouter.delete("/:id", subject.deleteSubject);
 subjectRouter.use("/:subjectId/chapters", chapterRouter);
+subjectRouter.get("/:subjectId/scores", score.getScores);
 export default subjectRouter;
