@@ -117,9 +117,35 @@ export async function createScore(req: Request, res: Response) {
             performance_level = "strong";
         }
 
+
+        // Score query
         const scores = await db.query<{ id: string; chapter_id: string; score_percentage: number; performance_level: string; deadline: string; created_at: string; }>("INSERT INTO scores (chapter_id,score_percentage,performance_level,deadline) VALUES ($1,$2,$3,$4) RETURNING *", [chapterId, score_percentage, performance_level, deadline]);
 
-        return res.status(201).json({ message: "Score created successfully", score: scores[0] });
+        // Caculate the revision date
+        function calculateRevisionDate(
+            performance: "weak" | "average" | "strong"
+        ): string {
+            const today = new Date();
+
+            if (performance === "weak") today.setDate(today.getDate() + 2);
+            else if (performance === "average") today.setDate(today.getDate() + 4);
+            else today.setDate(today.getDate() + 7);
+
+            return today.toISOString().split("T")[0]; // YYYY-MM-DD
+        }
+        const revision_date = calculateRevisionDate(performance_level);
+
+        await db.query(
+            `INSERT INTO revisions (score_id, revision_date) VALUES ($1, $2)`,
+            [scores[0].id, revision_date]
+        );
+
+        return res.status(201).json({
+            message: "Score created and revision scheduled automatically",
+            scoreId: scores[0].id,
+            performance_level,
+            revision_date
+        });
     } catch (err) {
         return res.status(401).json({ message: "Invalid or expired token" });
     }
