@@ -17,17 +17,18 @@ export async function getScores(req: Request, res: Response) {
             strong: number;
             average_percentage: number | null;
         }>(
-            `SELECT
-  COUNT(*) FILTER (WHERE sc.performance_level = 'weak')    AS weak,
-  COUNT(*) FILTER (WHERE sc.performance_level = 'average') AS average,
-  COUNT(*) FILTER (WHERE sc.performance_level = 'strong')  AS strong,
-  ROUND(AVG(sc.score_percentage), 2) AS average_percentage
-FROM scores sc
-JOIN chapters ch ON sc.chapter_id = ch.id
-JOIN subjects s ON ch.subject_id = s.id
-WHERE s.id = $1
-  AND s.user_id = $2;
-      `,
+            ` 
+            SELECT
+            COUNT(*) FILTER (WHERE sc.performance_level = 'weak') AS weak,
+            COUNT(*) FILTER (WHERE sc.performance_level = 'average') AS average,
+            COUNT(*) FILTER (WHERE sc.performance_level = 'strong') AS strong,
+            ROUND(AVG(sc.score_percentage), 2) AS average_percentage
+            FROM scores sc
+            JOIN chapters ch ON sc.chapter_id = ch.id
+            JOIN subjects s ON ch.subject_id = s.id
+            WHERE s.id = $1
+            AND s.user_id = $2;
+            `,
             [subjectId, userId]
         );
 

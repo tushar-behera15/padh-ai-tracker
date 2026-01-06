@@ -9,10 +9,11 @@ import revisionRounter from "./routes/revision.route";
 const app = express();
 app.use(helmet());
 app.use(cors({
-    origin: "localhost:3000",
-    credentials: true
+    origin: "http://localhost:3000", // your frontend URL
+    credentials: true,               // allow cookies to be sent
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use("/api/auth", authRouter);
 app.use("/api/subject", subjectRouter);
