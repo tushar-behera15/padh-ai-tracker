@@ -8,7 +8,35 @@ export async function getSubjects(req: Request, res: Response) {
             return res.status(401).json({ message: "Unauthorized" });
         }
         const decoded = verifyToken(token) as { userId: string };
-        const subjects = await db.query<{ id: string; name: string }>("SELECT id,name FROM subjects WHERE user_id=$1", [decoded.userId]);
+        const subjects = await db.query<{
+            id: string;
+            name: string;
+            chapter_count: number;
+            pending_revisions: number;
+        }>(
+            `
+            SELECT
+                s.id,
+                s.name,
+                COUNT(DISTINCT c.id) AS chapter_count,
+                COUNT(
+                    DISTINCT CASE
+                    WHEN r.completed = FALSE THEN r.id
+                    END
+                ) AS pending_revisions
+                FROM subjects s
+                LEFT JOIN chapters c
+                    ON c.subject_id = s.id
+                LEFT JOIN scores sc
+                    ON sc.chapter_id = c.id
+                LEFT JOIN revisions r
+                    ON r.score_id = sc.id
+                WHERE s.user_id = $1
+                GROUP BY s.id
+                ORDER BY s.created_at DESC
+                `,
+            [decoded.userId]
+        );
         return res.status(200).json({ message: "Subject fetched successfully", subjects });
     } catch (err) {
         return res.status(401).json({ message: "Invalid or expired token" });
