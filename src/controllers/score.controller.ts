@@ -165,17 +165,19 @@ export async function updateScore(req: Request, res: Response) {
 
         if (score_percentage === undefined || !deadline) {
             return res.status(400).json({
-                message: "score_percentage and deadline are required"
+                message: "score_percentage and deadline are required",
             });
         }
 
         const { userId } = verifyToken(token) as { userId: string };
 
+        /** Determine performance */
         let performance_level: "weak" | "average" | "strong";
         if (score_percentage < 40) performance_level = "weak";
         else if (score_percentage < 70) performance_level = "average";
         else performance_level = "strong";
 
+        /** 1️⃣ Update score */
         const scores = await db.query<{
             id: string;
             chapter_id: string;
@@ -184,23 +186,23 @@ export async function updateScore(req: Request, res: Response) {
             deadline: string;
         }>(
             `
-      UPDATE scores sc
-      SET
-        score_percentage = $1,
-        performance_level = $2,
-        deadline = $3
-      FROM chapters ch
-      JOIN subjects s ON ch.subject_id = s.id
-      WHERE sc.id = $4
-        AND sc.chapter_id = ch.id
-        AND s.user_id = $5
-      RETURNING
-        sc.id,
-        sc.chapter_id,
-        sc.score_percentage,
-        sc.performance_level,
-        sc.deadline
-      `,
+            UPDATE scores sc
+            SET
+              score_percentage = $1,
+              performance_level = $2,
+              deadline = $3
+            FROM chapters ch
+            JOIN subjects s ON ch.subject_id = s.id
+            WHERE sc.id = $4
+              AND sc.chapter_id = ch.id
+              AND s.user_id = $5
+            RETURNING
+              sc.id,
+              sc.chapter_id,
+              sc.score_percentage,
+              sc.performance_level,
+              sc.deadline
+            `,
             [score_percentage, performance_level, deadline, scoreId, userId]
         );
 
@@ -208,9 +210,41 @@ export async function updateScore(req: Request, res: Response) {
             return res.status(404).json({ message: "Score not found" });
         }
 
+        /** 2️⃣ Remove old revision */
+        await db.query(
+            `DELETE FROM revisions WHERE score_id = $1`,
+            [scoreId]
+        );
+
+        /** 3️⃣ Calculate new revision date */
+        const revisionDays =
+            performance_level === "weak"
+                ? 2
+                : performance_level === "average"
+                    ? 4
+                    : 7;
+
+        const revisionDate = new Date();
+        revisionDate.setDate(revisionDate.getDate() + revisionDays);
+
+        /** Optional: don't exceed deadline */
+        const deadlineDate = new Date(deadline);
+        if (revisionDate > deadlineDate) {
+            revisionDate.setTime(deadlineDate.getTime());
+        }
+
+        /** 4️⃣ Insert new revision */
+        await db.query(
+            `
+            INSERT INTO revisions (score_id, revision_date)
+            VALUES ($1, $2)
+            `,
+            [scoreId, revisionDate.toISOString().split("T")[0]]
+        );
+
         return res.status(200).json({
-            message: "Score updated successfully",
-            score: scores[0]
+            message: "Score & revision updated successfully",
+            score: scores[0],
         });
 
     } catch (err) {
@@ -218,6 +252,7 @@ export async function updateScore(req: Request, res: Response) {
         return res.status(500).json({ message: "Internal server error" });
     }
 }
+
 
 export async function deleteScore(req: Request, res: Response) {
     try {
