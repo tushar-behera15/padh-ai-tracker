@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import db from "../utils/db";
 import { verifyToken } from "../utils/jwt";
+import { getAIRevisionStrategy } from "../services/aiRevisionStrategy";
+import { buildRevisionDates } from "../services/revisionScheduler";
 export async function getScores(req: Request, res: Response) {
     try {
         const token = req.cookies?.token;
@@ -93,70 +95,140 @@ export async function getScoresOfChapter(req: Request, res: Response) {
 
 
 export async function createScore(req: Request, res: Response) {
+    const client = await db.getClient(); // pg Pool client
     try {
+        await client.query("BEGIN");
+
         const token = req.cookies?.token;
         if (!token) {
+            await client.query("ROLLBACK");
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const { score_percentage, deadline } = req.body;
-        if (score_percentage == undefined || !deadline) {
-            return res.status(400).json({ message: "Score_percentage & deadline field is required" });
-        }
-        const { chapterId } = req.params;
+
         const decoded = verifyToken(token) as { userId: string };
-        const chapters = await db.query<{ id: string }>("SELECT ch.id FROM chapters ch JOIN subjects s ON ch.subject_id = s.id WHERE ch.id=$1 AND s.user_id=$2", [chapterId, decoded.userId])
-        if (chapters.length === 0) {
-            return res.status(404).json({ message: "Chapter not found" });
-        }
-        let performance_level: "weak" | "average" | "strong";
 
-        if (score_percentage < 40) {
-            performance_level = "weak";
-        } else if (score_percentage < 70) {
-            performance_level = "average";
-        } else {
-            performance_level = "strong";
+        const { score_percentage, deadline } = req.body;
+        if (score_percentage === undefined || !deadline) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+                message: "score_percentage & deadline are required",
+            });
         }
 
+        const { chapterId } = req.params;
 
-        // Score query
-        const scores = await db.query<{ id: string; chapter_id: string; score_percentage: number; performance_level: string; deadline: string; created_at: string; }>("INSERT INTO scores (chapter_id,score_percentage,performance_level,deadline) VALUES ($1,$2,$3,$4) RETURNING *", [chapterId, score_percentage, performance_level, deadline]);
-
-        // Caculate the revision date
-        function calculateRevisionDate(
-            performance: "weak" | "average" | "strong"
-        ): string {
-            const today = new Date();
-
-            if (performance === "weak") today.setDate(today.getDate() + 2);
-            else if (performance === "average") today.setDate(today.getDate() + 4);
-            else today.setDate(today.getDate() + 7);
-
-            return today.toISOString().split("T")[0]; // YYYY-MM-DD
-        }
-        const revision_date = calculateRevisionDate(performance_level);
-
-        await db.query(
-            `INSERT INTO revisions (score_id, revision_date) VALUES ($1, $2)`,
-            [scores[0].id, revision_date]
+        // Verify chapter ownership
+        const chapterRes = await client.query(
+            `
+            SELECT ch.id
+            FROM chapters ch
+            JOIN subjects s ON ch.subject_id = s.id
+            WHERE ch.id = $1 AND s.user_id = $2
+            `,
+            [chapterId, decoded.userId]
         );
 
+        if (chapterRes.rows.length === 0) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ message: "Chapter not found" });
+        }
+
+        // 🔥 DELETE OLD REVISIONS FIRST (FK SAFE)
+        await client.query(
+            `
+            DELETE FROM revisions
+            WHERE score_id IN (
+                SELECT id FROM scores WHERE chapter_id = $1
+            )
+            `,
+            [chapterId]
+        );
+
+        // 🔥 DELETE OLD SCORE
+        await client.query(
+            `DELETE FROM scores WHERE chapter_id = $1`,
+            [chapterId]
+        );
+
+        // Performance level
+        let performance_level: "weak" | "average" | "strong";
+        if (score_percentage < 40) performance_level = "weak";
+        else if (score_percentage < 70) performance_level = "average";
+        else performance_level = "strong";
+
+        // 🔥 INSERT NEW SCORE (SAME CLIENT)
+        const scoreRes = await client.query(
+            `
+            INSERT INTO scores
+            (chapter_id, score_percentage, performance_level, deadline)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            `,
+            [chapterId, score_percentage, performance_level, deadline]
+        );
+
+        const scoreId = scoreRes.rows[0].id;
+
+        // -------- AI PART --------
+        const daysLeft = Math.ceil(
+            (new Date(deadline).getTime() - Date.now()) / 86400000
+        );
+
+        const aiStrategy = await getAIRevisionStrategy(
+            score_percentage,
+            daysLeft
+        );
+
+        const revisionDates = buildRevisionDates(
+            aiStrategy,
+            deadline
+        );
+        // ------------------------
+
+        // 🔥 INSERT REVISIONS (SAME CLIENT)
+        for (const date of revisionDates) {
+            await client.query(
+                `
+                INSERT INTO revisions (score_id, revision_date)
+                VALUES ($1, $2)
+                `,
+                [scoreId, date]
+            );
+        }
+
+        await client.query("COMMIT");
+
         return res.status(201).json({
-            message: "Score created and revision scheduled automatically",
-            scoreId: scores[0].id,
+            message: "Score created & AI scheduled revisions",
+            scoreId,
             performance_level,
-            revision_date
+            ai_strategy: aiStrategy,
+            revision_plan: revisionDates,
         });
-    } catch (err) {
-        return res.status(401).json({ message: "Invalid or expired token" });
+    } catch (error) {
+        await client.query("ROLLBACK");
+        console.error(error);
+        return res.status(500).json({
+            message: "Failed to create score",
+        });
+    } finally {
+        client.release();
     }
 }
 
 
+
+
+
+
 export async function updateScore(req: Request, res: Response) {
+    const client = await db.getClient();
     try {
+        await client.query("BEGIN");
+
         const token = req.cookies?.token;
         if (!token) {
+            await client.query("ROLLBACK");
             return res.status(401).json({ message: "Unauthorized" });
         }
 
@@ -164,6 +236,7 @@ export async function updateScore(req: Request, res: Response) {
         const { score_percentage, deadline } = req.body;
 
         if (score_percentage === undefined || !deadline) {
+            await client.query("ROLLBACK");
             return res.status(400).json({
                 message: "score_percentage and deadline are required",
             });
@@ -171,19 +244,16 @@ export async function updateScore(req: Request, res: Response) {
 
         const { userId } = verifyToken(token) as { userId: string };
 
-        /** Determine performance */
+        // Determine performance
         let performance_level: "weak" | "average" | "strong";
         if (score_percentage < 40) performance_level = "weak";
         else if (score_percentage < 70) performance_level = "average";
         else performance_level = "strong";
 
-        /** 1️⃣ Update score */
-        const scores = await db.query<{
+        // 🔥 Update score with ownership check
+        const scoreRes = await client.query<{
             id: string;
             chapter_id: string;
-            score_percentage: number;
-            performance_level: string;
-            deadline: string;
         }>(
             `
             UPDATE scores sc
@@ -196,62 +266,79 @@ export async function updateScore(req: Request, res: Response) {
             WHERE sc.id = $4
               AND sc.chapter_id = ch.id
               AND s.user_id = $5
-            RETURNING
-              sc.id,
-              sc.chapter_id,
-              sc.score_percentage,
-              sc.performance_level,
-              sc.deadline
+            RETURNING sc.id, sc.chapter_id
             `,
             [score_percentage, performance_level, deadline, scoreId, userId]
         );
 
-        if (scores.length === 0) {
+        if (scoreRes.rows.length === 0) {
+            await client.query("ROLLBACK");
             return res.status(404).json({ message: "Score not found" });
         }
 
-        /** 2️⃣ Remove old revision */
-        await db.query(
+        const updatedScoreId = scoreRes.rows[0].id;
+
+        // 🔥 Delete old revisions (FK safe)
+        await client.query(
             `DELETE FROM revisions WHERE score_id = $1`,
-            [scoreId]
+            [updatedScoreId]
         );
 
-        /** 3️⃣ Calculate new revision date */
-        const revisionDays =
-            performance_level === "weak"
-                ? 2
-                : performance_level === "average"
-                    ? 4
-                    : 7;
+        // -------- AI PART --------
+        const daysLeft = Math.ceil(
+            (new Date(deadline).getTime() - Date.now()) / 86400000
+        );
 
-        const revisionDate = new Date();
-        revisionDate.setDate(revisionDate.getDate() + revisionDays);
-
-        /** Optional: don't exceed deadline */
-        const deadlineDate = new Date(deadline);
-        if (revisionDate > deadlineDate) {
-            revisionDate.setTime(deadlineDate.getTime());
+        let aiStrategy;
+        try {
+            aiStrategy = await getAIRevisionStrategy(
+                score_percentage,
+                daysLeft
+            );
+        } catch {
+            // Fallback if AI fails
+            aiStrategy = {
+                revision_count: 2,
+                initial_gap: 3,
+                gap_multiplier: 1.6,
+            };
         }
 
-        /** 4️⃣ Insert new revision */
-        await db.query(
-            `
-            INSERT INTO revisions (score_id, revision_date)
-            VALUES ($1, $2)
-            `,
-            [scoreId, revisionDate.toISOString().split("T")[0]]
+        const revisionDates = buildRevisionDates(
+            aiStrategy,
+            deadline
         );
+        // ------------------------
+
+        // 🔥 Insert new revisions
+        for (const date of revisionDates) {
+            await client.query(
+                `
+                INSERT INTO revisions (score_id, revision_date)
+                VALUES ($1, $2)
+                `,
+                [updatedScoreId, date]
+            );
+        }
+
+        await client.query("COMMIT");
 
         return res.status(200).json({
-            message: "Score & revision updated successfully",
-            score: scores[0],
+            message: "Score & revisions updated successfully",
+            scoreId: updatedScoreId,
+            performance_level,
+            ai_strategy: aiStrategy,
+            revision_plan: revisionDates,
         });
-
     } catch (err) {
+        await client.query("ROLLBACK");
         console.error("updateScore error:", err);
         return res.status(500).json({ message: "Internal server error" });
+    } finally {
+        client.release();
     }
 }
+
 
 
 export async function deleteScore(req: Request, res: Response) {

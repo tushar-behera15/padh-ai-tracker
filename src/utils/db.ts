@@ -1,5 +1,5 @@
 // src/lib/db.ts
-import { Pool } from "pg";
+import { Pool, PoolClient } from "pg";
 import "../config/env";
 // Create PostgreSQL connection pool
 const pool = new Pool({
@@ -15,10 +15,14 @@ async function query<T = any>(text: string, params?: any[]): Promise<T[]> {
     const result = await pool.query(text, params);
     return result.rows as T[];
 }
+async function getClient(): Promise<PoolClient> {
+    return pool.connect();
+}
 
 // Export db object
 const db = {
-    query
+    query,
+    getClient
 };
 
 export default db;
