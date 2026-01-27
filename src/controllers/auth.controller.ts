@@ -5,6 +5,7 @@ import { signToken, verifyToken } from "../utils/jwt";
 export async function register(req: Request, res: Response) {
 
     const { name, email, password } = req.body;
+    console.log(process.env.MY_NODE_ENV);
     const hashedPass = await bcrypt.hash(password, 10);
     const existingUser = await db.query("SELECT id FROM users WHERE email=$1", [email]);
     if (existingUser.length > 0) {
@@ -14,12 +15,14 @@ export async function register(req: Request, res: Response) {
     const user = newUser[0];
     const token = signToken({ userId: user.id });
     const { password: _password, ...safeUser } = user;
+
     return res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.MY_NODE_ENV === "production",
         sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
     }).status(201).json({ message: "User Created Succesfully", user: safeUser });
+
 }
 
 
@@ -55,7 +58,7 @@ export async function login(req: Request, res: Response) {
     return res
         .cookie("token", token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
+            secure: process.env.MY_NODE_ENV === "production",
             sameSite: "lax",
             maxAge: 7 * 24 * 60 * 60 * 1000
         })
@@ -69,7 +72,7 @@ export async function login(req: Request, res: Response) {
 export async function logout(req: Request, res: Response) {
     res.clearCookie("token", {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: process.env.MY_NODE_ENV === "production",
         sameSite: "lax",
     })
     return res.status(200).json({ message: "Logout Successfully" });
