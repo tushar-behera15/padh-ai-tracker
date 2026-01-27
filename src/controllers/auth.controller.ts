@@ -29,6 +29,7 @@ export async function register(req: Request, res: Response) {
 export async function login(req: Request, res: Response) {
     const { email, password } = req.body;
 
+    console.log(process.env.MY_NODE_ENV);
     const users = await db.query<{
         id: string;
         name: string;
@@ -49,7 +50,6 @@ export async function login(req: Request, res: Response) {
     if (!valid) {
         return res.status(401).json({ message: "Invalid credentials" });
     }
-
     const token = signToken({ userId: user.id });
 
     const { password: _password, ...safeUser } = user;

@@ -5,9 +5,11 @@ import helmet from "helmet";
 import authRouter from "./routes/auth.route";
 import subjectRouter from "./routes/subject.route";
 import revisionRounter from "./routes/revision.route";
+import morgan from 'morgan'
 
 const app = express();
 app.use(helmet());
+app.use(morgan(':method :url :status :res[content-length] - :response-time ms'))
 app.use(cors({
     origin: "http://localhost:3000", // your frontend URL
     credentials: true,               // allow cookies to be sent
