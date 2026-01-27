@@ -16,7 +16,7 @@ export async function register(req: Request, res: Response) {
     const { password: _password, ...safeUser } = user;
     return res.cookie("token", token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: process.env.MY_NODE_ENV === "production",
         sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
     }).status(201).json({ message: "User Created Succesfully", user: safeUser });
