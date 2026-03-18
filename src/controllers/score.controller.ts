@@ -174,10 +174,20 @@ export async function createScore(req: Request, res: Response) {
             (new Date(deadline).getTime() - Date.now()) / 86400000
         );
 
-        const aiStrategy = await getAIRevisionStrategy(
-            score_percentage,
-            daysLeft
-        );
+        let aiStrategy;
+        try {
+            aiStrategy = await getAIRevisionStrategy(
+                score_percentage,
+                daysLeft
+            );
+        } catch {
+            // Fallback if AI fails
+            aiStrategy = {
+                revision_count: 2,
+                initial_gap: 3,
+                gap_multiplier: 1.6,
+            };
+        }
 
         const revisionDates = buildRevisionDates(
             aiStrategy,
