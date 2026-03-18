@@ -1,6 +1,5 @@
 // src/lib/db.ts
 import { Pool, PoolClient } from "pg";
-import "../config/env";
 // Create PostgreSQL connection pool
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
